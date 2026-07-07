@@ -1,0 +1,26 @@
+# Kaggle-provided competition data (must not be redistributed per competition rules;
+# re-download with `kaggle competitions download -c pokemon-tcg-ai-battle`)
+/data/
+
+# Build output
+/build/
+*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*access_token*
+kaggle.json
