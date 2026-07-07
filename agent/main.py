@@ -13,6 +13,7 @@ from cg.api import (
     SelectContext,
     SelectData,
     SelectType,
+    SpecialConditionType,
     all_attack,
     all_card_data,
     to_observation_class,
@@ -105,7 +106,9 @@ def _best_score_against(attacker_type, energy_count: int, attacker_card: CardDat
 
 def _retreat_is_urgent(obs: Observation) -> bool:
     """True when our active is likely doomed next turn and attacking now wouldn't
-    secure a KO anyway -- i.e. fleeing to a healthier bench Pokemon beats attacking."""
+    secure a KO anyway -- i.e. fleeing to a healthier bench Pokemon beats attacking.
+    An ex/Mega ex active gets a lower bar: losing it hands the opponent an extra
+    prize (or two), so it's worth fleeing even from a hit we'd technically survive."""
     state = obs.current
     me = state.players[state.yourIndex]
     opp = state.players[1 - state.yourIndex]
@@ -126,8 +129,10 @@ def _retreat_is_urgent(obs: Observation) -> bool:
     threat = 0.0
     if defender is not None and defender_card is not None:
         threat = _best_score_against(defender_card.energyType, len(defender.energies), defender_card, active_card)
-    if threat < active.hp:
-        return False  # we'd survive their best realistic hit anyway
+
+    protect_margin = 0.7 if (active_card.ex or active_card.megaEx) else 1.0
+    if threat < active.hp * protect_margin:
+        return False  # we'd survive comfortably enough to risk staying in
 
     return any(bench_mon.hp > active.hp for bench_mon in me.bench)
 
@@ -266,6 +271,9 @@ _KEEP_HIGH_HP_CONTEXTS = {
     SelectContext.TO_FIELD,
     SelectContext.REMOVE_DAMAGE_COUNTER,
     SelectContext.HEAL,
+    SelectContext.NOT_MOVE,    # the card that *stays put* -- keep our best one, not our worst
+    SelectContext.TO_HAND,     # a card we get to keep -- prefer the most useful
+    SelectContext.EVOLVES_TO,  # which of our Pokemon gets evolved -- prefer the healthiest
 }
 
 # Bringing a Pokemon into the Active Spot (initial setup, a forced switch, or
@@ -275,13 +283,14 @@ _PREFER_READY_CONTEXTS = {
     SelectContext.SETUP_ACTIVE_POKEMON,
     SelectContext.SWITCH,
     SelectContext.TO_ACTIVE,
+    SelectContext.ATTACH_FROM,  # which Pokemon receives an effect-driven attachment
 }
 
 _DISCARD_LIKE_CONTEXTS = {
     SelectContext.DISCARD,
     SelectContext.TO_DECK,
     SelectContext.TO_DECK_BOTTOM,
-    SelectContext.NOT_MOVE,
+    SelectContext.TO_PRIZE,  # buried face-down until end of game -- give up what we need least
 }
 
 _TARGET_OPPONENT_CONTEXTS = {
@@ -386,6 +395,29 @@ def _choose_card(obs: Observation, select: SelectData) -> list[int]:
     return random.sample(range(len(options)), n) if n > 0 else []
 
 
+# ---- SelectType.SPECIAL_CONDITION ----------------------------------------------
+# Two contexts share this select type: inflicting a condition on the opponent
+# (AFFECT_SPECIAL_CONDITION) and curing one of our own (RECOVER_SPECIAL_CONDITION).
+# Both want the most crippling condition picked -- worst to hand the opponent,
+# worst to remove from ourselves.
+
+_CONDITION_SEVERITY = {
+    SpecialConditionType.PARALYZE: 4,  # can't attack or retreat at all
+    SpecialConditionType.SLEEP: 3,     # can't attack or retreat, coin-flip recovery
+    SpecialConditionType.CONFUSE: 2,   # coin-flip self-damage when attacking
+    SpecialConditionType.BURN: 1,      # chip damage between turns
+    SpecialConditionType.POISON: 1,    # chip damage between turns
+}
+
+
+def _choose_special_condition(select: SelectData) -> list[int]:
+    best_i = max(
+        range(len(select.option)),
+        key=lambda i: _CONDITION_SEVERITY.get(select.option[i].specialConditionType, 0),
+    )
+    return [best_i]
+
+
 # ---- SelectType.YES_NO --------------------------------------------------------
 
 _YES_NO_DEFAULT_YES = {
@@ -428,6 +460,8 @@ def _decide(obs: Observation) -> list[int]:
         return _choose_shed(obs, select)
     if select.type == SelectType.CARD:
         return _choose_card(obs, select)
+    if select.type == SelectType.SPECIAL_CONDITION:
+        return _choose_special_condition(select)
     if select.type == SelectType.YES_NO:
         return _choose_yes_no(select)
     if select.type == SelectType.COUNT:
