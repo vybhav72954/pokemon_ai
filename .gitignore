@@ -2,6 +2,9 @@
 # re-download with `kaggle competitions download -c pokemon-tcg-ai-battle`)
 /data/
 
+# Local working notes for Claude Code -- not for GitHub
+/CLAUDE.md
+
 # Build output
 /build/
 *.tar.gz
